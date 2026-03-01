@@ -78,10 +78,12 @@ String API_URL   = "";
 String API_MODEL = "";
 String UPLOAD_HOST = "example.com";
 String UPLOAD_PATH = "/neurosnap/upload.php";
+String DROPOFF_PATH = "/neurosnap/dropoff.php";
 String promptFromFile = "";
 String adminPassword = "admin"; // Default password
 String lastImageFileName = "";
 bool loggingEnabled = false;
+bool guidedMode = false;
 
 HardwareSerial mySerial(2);
 Adafruit_Thermal printer(&mySerial);
@@ -156,7 +158,6 @@ const char index_html[] PROGMEM = R"rawliteral(
     </div>
     <div class="card">
       <h2>System</h2>
-      <a href="/firmwareupdate"><button>Firmware Update</button></a>
       <button onclick="showSettings()">Einstellungen</button>
     </div>
     <div id="settingsCard" class="card" style="display:none;">
@@ -171,13 +172,18 @@ const char index_html[] PROGMEM = R"rawliteral(
       <input type="text" id="uploadHostInput" placeholder="Upload Host (z.B. example.com)">
       <label>Pfad zum PHP-Script auf dem Server:</label>
       <input type="text" id="uploadPathInput" placeholder="Upload Path (z.B. /neurosnap/upload.php)">
+      <label>Pfad zum Dropoff-Script (KI Analyse):</label>
+      <input type="text" id="dropoffPathInput" placeholder="Dropoff Path (z.B. /neurosnap/dropoff.php)">
       <label style="display:flex; align-items:center; margin-top:10px;"><input type="checkbox" id="loggingInput" style="width:auto; margin-right:10px;"> Logging auf SD-Karte aktivieren</label>
+      <label style="display:flex; align-items:center; margin-top:10px;"><input type="checkbox" id="guidedInput" style="width:auto; margin-right:10px;"> Geführter Modus (Drucker-Hilfe)</label>
       <button onclick="saveSettings()">Speichern</button>
       <hr>
       <h3>System Log</h3>
       <textarea id="logOutput" rows="10" style="background:#333; color:#0f0; font-family:monospace; font-size:12px;" readonly></textarea>
       <button onclick="fetchLog()">Log aktualisieren</button>
       <button onclick="deleteLog()" style="background:#cf6679; margin-top:5px;">Log Datei löschen</button>
+      <hr>
+      <a href="/firmwareupdate"><button style="background:#666; margin-top:10px;">Firmware Update</button></a>
     </div>
   </div>
 <script>
@@ -254,12 +260,12 @@ const char index_html[] PROGMEM = R"rawliteral(
     fetch('/getSettings?pass=' + encodeURIComponent(pass))
       .then(r => {
         if(r.status === 401) {
-          alert("Falsches Passwort!");
-          return;
+          throw new Error("Falsches Passwort!");
         }
-        if(r.ok) {
-          return r.json();
+        if(!r.ok) {
+          throw new Error("HTTP Fehler: " + r.status);
         }
+        return r.json();
       })
       .then(data => {
         if(data) {
@@ -268,11 +274,14 @@ const char index_html[] PROGMEM = R"rawliteral(
           document.getElementById('apiModelInput').value = data.api_model;
           document.getElementById('uploadHostInput').value = data.upload_host;
           document.getElementById('uploadPathInput').value = data.upload_path;
+          document.getElementById('dropoffPathInput').value = data.dropoff_path;
           document.getElementById('loggingInput').checked = data.logging_enabled;
+          document.getElementById('guidedInput').checked = data.guided_mode;
           document.getElementById('settingsCard').style.display = 'block';
           fetchLog();
         }
-      });
+      })
+      .catch(e => alert("Fehler: " + e));
   }
 
   function saveSettings() {
@@ -284,7 +293,9 @@ const char index_html[] PROGMEM = R"rawliteral(
     const apiModel = document.getElementById('apiModelInput').value;
     const uploadHost = document.getElementById('uploadHostInput').value;
     const uploadPath = document.getElementById('uploadPathInput').value;
+    const dropoffPath = document.getElementById('dropoffPathInput').value;
     const logging = document.getElementById('loggingInput').checked ? '1' : '0';
+    const guided = document.getElementById('guidedInput').checked ? '1' : '0';
 
     fetch('/setSettings?pass=' + encodeURIComponent(pass) + 
           '&api_key=' + encodeURIComponent(apiKey) + 
@@ -292,7 +303,9 @@ const char index_html[] PROGMEM = R"rawliteral(
           '&api_model=' + encodeURIComponent(apiModel) +
           '&upload_host=' + encodeURIComponent(uploadHost) +
           '&upload_path=' + encodeURIComponent(uploadPath) +
-          '&logging=' + encodeURIComponent(logging), {method: 'POST'})
+          '&dropoff_path=' + encodeURIComponent(dropoffPath) +
+          '&logging=' + encodeURIComponent(logging) +
+          '&guided=' + encodeURIComponent(guided), {method: 'POST'})
       .then(r => {
         if(r.status === 401) {
           alert("Falsches Passwort!");
@@ -360,7 +373,6 @@ const char update_html[] PROGMEM = R"rawliteral(
     <h1>NeuroSnap Firmware Update</h1>
     <div class="card">
       <form method='POST' action='/update' enctype='multipart/form-data' id='upload_form'>
-        <input type='password' name='pass' placeholder='Passwort' required>
         <input type='file' name='update' accept='.bin' required>
         <button type='submit'>Firmware aktualisieren</button>
       </form>
@@ -370,10 +382,9 @@ const char update_html[] PROGMEM = R"rawliteral(
   </div>
   <script>
     document.getElementById('upload_form').addEventListener('submit', function(e) {
-      var password = this.querySelector("input[name='pass']").value;
       var fileInput = this.querySelector("input[name='update']");
-      if(password.trim() === '' || fileInput.files.length === 0) {
-        alert("Bitte Passwort und eine Datei auswählen.");
+      if(fileInput.files.length === 0) {
+        alert("Bitte eine Datei auswählen.");
         e.preventDefault();
         return;
       }
@@ -506,8 +517,8 @@ void uploadAndAnalyze(camera_fb_t *fb) {
   client.setInsecure(); // Required for HTTPS
   
   String dropoffUrl = "";
-  String dropoffScript = UPLOAD_PATH;
-  dropoffScript.replace("upload.php", "dropoff.php");
+  // Use configured dropoff path or fallback
+  String dropoffScript = (DROPOFF_PATH.length() > 0) ? DROPOFF_PATH : "/neurosnap/dropoff.php";
   
   if (client.connect(UPLOAD_HOST.c_str(), 443)) {
       String boundary = "------------------------" + String(millis());
@@ -689,6 +700,10 @@ void setup() {
     UPLOAD_PATH = configFile.readStringUntil('\n'); UPLOAD_PATH.trim();
     String logStr = configFile.readStringUntil('\n'); logStr.trim();
     loggingEnabled = (logStr == "1");
+    DROPOFF_PATH = configFile.readStringUntil('\n'); DROPOFF_PATH.trim();
+    String guidedStr = configFile.readStringUntil('\n'); guidedStr.trim();
+    guidedMode = (guidedStr == "1");
+
     configFile.close();
     
     // Set defaults if empty
@@ -700,6 +715,7 @@ void setup() {
     
     if (UPLOAD_HOST.length() == 0) UPLOAD_HOST = "example.com";
     if (UPLOAD_PATH.length() == 0) UPLOAD_PATH = "/neurosnap/upload.php";
+    if (DROPOFF_PATH.length() == 0) DROPOFF_PATH = "/neurosnap/dropoff.php";
   }
 
   // Load Password
@@ -846,7 +862,21 @@ void setup() {
         response->print(loggingEnabled ? "true" : "false");
         response->print("\"}");
         request->send(response);
+        JsonDocument doc;
+        doc["api_key"] = API_KEY;
+        doc["api_url"] = API_URL;
+        doc["api_model"] = API_MODEL;
+        doc["upload_host"] = UPLOAD_HOST;
+        doc["upload_path"] = UPLOAD_PATH;
+        doc["dropoff_path"] = DROPOFF_PATH;
+        doc["logging_enabled"] = loggingEnabled;
+        doc["guided_mode"] = guidedMode;
+        
+        String jsonStr;
+        serializeJson(doc, jsonStr);
+        request->send(200, "application/json", jsonStr);
     } else {
+        sysLog("Settings Login Failed");
         request->send(401, "text/plain", "Unauthorized");
     }
   });
@@ -854,13 +884,21 @@ void setup() {
   server.on("/setSettings", HTTP_POST, [](AsyncWebServerRequest *request){
     if (request->hasParam("pass") && request->getParam("pass")->value() == adminPassword) {
         if (request->hasParam("api_key") && request->hasParam("api_url") && request->hasParam("api_model") &&
-            request->hasParam("upload_host") && request->hasParam("upload_path") && request->hasParam("logging")) {
+            request->hasParam("upload_host") && request->hasParam("upload_path") && request->hasParam("dropoff_path") && request->hasParam("logging") && request->hasParam("guided")) {
             API_KEY = request->getParam("api_key")->value();
+            API_KEY.replace("\n", ""); API_KEY.replace("\r", "");
             API_URL = request->getParam("api_url")->value();
+            API_URL.replace("\n", ""); API_URL.replace("\r", "");
             API_MODEL = request->getParam("api_model")->value();
+            API_MODEL.replace("\n", ""); API_MODEL.replace("\r", "");
             UPLOAD_HOST = request->getParam("upload_host")->value();
+            UPLOAD_HOST.replace("\n", ""); UPLOAD_HOST.replace("\r", "");
             UPLOAD_PATH = request->getParam("upload_path")->value();
+            UPLOAD_PATH.replace("\n", ""); UPLOAD_PATH.replace("\r", "");
+            DROPOFF_PATH = request->getParam("dropoff_path")->value();
+            DROPOFF_PATH.replace("\n", ""); DROPOFF_PATH.replace("\r", "");
             loggingEnabled = (request->getParam("logging")->value() == "1");
+            guidedMode = (request->getParam("guided")->value() == "1");
 
             File configFile = SD_MMC.open("/config.txt", FILE_WRITE);
             if (configFile) {
@@ -869,7 +907,9 @@ void setup() {
                 configFile.println(API_MODEL);
                 configFile.println(UPLOAD_HOST);
                 configFile.println(UPLOAD_PATH);
-                configFile.print(loggingEnabled ? "1" : "0");
+                configFile.println(loggingEnabled ? "1" : "0");
+                configFile.println(DROPOFF_PATH);
+                configFile.println(guidedMode ? "1" : "0");
                 configFile.close();
                 request->send(200, "text/plain", "OK");
             } else {
@@ -905,12 +945,6 @@ void setup() {
     [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final){
         // 1. On first chunk, check password and start update
         if(index == 0){
-            // Authenticate
-            if(!request->hasParam("pass", true) || request->getParam("pass", true)->value() != adminPassword) {
-                // Abort with 401 Unauthorized
-                return request->send(401, "text/plain; charset=utf-8", "Falsches Passwort!");
-            }
-            
             Serial.printf("Update Start: %s\n", filename.c_str());
             // Start update process
             if(!Update.begin(UPDATE_SIZE_UNKNOWN)){ // Start with max available size
@@ -951,9 +985,40 @@ void setup() {
   printer.begin();
   printer.setCodePage(CODEPAGE_CP437);
   
-  printer.println("IP Adresse:");
-  printer.println(WiFi.localIP().toString().c_str());
-  printer.feed(1);
+  if(guidedMode) {
+      printer.justify('C');
+      printer.boldOn();
+      printer.println(F("Datenschutz-Hinweis:"));
+      printer.boldOff();
+      printer.println(F("Bilder werden zur Analyse"));
+      printer.println(F("an Mistral AI gesendet."));
+      printer.feed(1);
+
+      printer.boldOn();
+      printer.println(F("Papier abreissen:"));
+      printer.boldOff();
+      printer.println(F("Ueber die Kante ziehen."));
+      printer.feed(1);
+
+      printer.boldOn();
+      printer.println(F("Schwarzer Knopf:"));
+      printer.boldOff();
+      printer.println(F("Papier vorschieben."));
+      printer.feed(1);
+
+      printer.boldOn();
+      printer.println(F("Aktueller Prompt:"));
+      printer.boldOff();
+      drucke(promptFromFile.c_str());
+      printer.println(F("Aendern unter:"));
+      printer.println(WiFi.localIP().toString().c_str());
+      printer.feed(3);
+      printer.justify('L');
+  } else {
+      printer.println("IP Adresse:");
+      printer.println(WiFi.localIP().toString().c_str());
+      printer.feed(1);
+  }
 
   // Init Camera
   camera_config_t config;
