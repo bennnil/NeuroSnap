@@ -10,9 +10,9 @@ Das Projekt ist im Rahmen des Unterrichts entstanden und wurde hier dokumentiert
 * **Thermal Print:** Druckt die Beschreibung, einen Witz oder ein Gedicht über das Bild aus.
 * **Smart Feedback:** Eine farbige LED zeigt genau an, was die Kamera gerade macht (oder welcher Fehler vorliegt).
 * **SD-Card Config:** WLAN und API-Keys werden sicher auf der SD-Karte gespeichert, nicht im Code.
-* ** Webinterface:** Einstellungen, Logs und Firmware-Updates direkt im Browser.
-* ** Geführter Modus:** Der Drucker gibt Hilfestellungen beim Setup und Datenschutzhinweise.
-* ** Sicherheit:** Passwortschutz für kritische Funktionen.
+* **Webinterface:** Einstellungen, Logs und Firmware-Updates direkt im Browser.
+* **Geführter Modus:** Der Drucker gibt Hilfestellungen beim Setup und Datenschutzhinweise.
+* **Sicherheit:** Passwortschutz für kritische Funktionen.
 
 Inspiriert von der Initiative **[di.day](https://di.day/)**, vollzieht NeuroSnap mit Version 2 einen wichtigen Schritt in Richtung digitaler Souveränität und KI-Kompetenz. 
 
@@ -36,6 +36,7 @@ Lade `upload.php` und `dropoff.php` auf deinen Webserver (Ordner z.B. `/neurosna
 
 ### 2. Mistral API Key besorgen
 console.mistral.ai
+Achtung: Im kostenlosen Modus werden die hochgeladenen Bilder und prompts für das Training neuer KIs verwendet. Nutzt man die Bezahlversion ist das nicht der Fall. Weitere Informationen dazu wie man das abstellt: https://help.mistral.ai/en/articles/455207-can-i-opt-out-of-my-input-or-output-data-being-used-for-training und https://help.mistral.ai/en/articles/347617-do-you-use-my-user-data-to-train-your-artificial-intelligence-models
 
 ### 3. SD-Karte (Konfiguration)
 Lade die Dateien aus dem Ordner SD Karte in das Hauptverzeichnis deiner SD Karte. 
