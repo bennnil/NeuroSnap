@@ -1,0 +1,8 @@
+DEIN_MISTRAL_API_KEY
+https://api.mistral.ai/v1/chat/completions
+pixtral-12b-2409
+dein-server.de
+/neurosnap/upload.php
+0
+/neurosnap/dropoff.php
+0
