@@ -515,6 +515,7 @@ void uploadAndAnalyze(camera_fb_t *fb) {
   
   WiFiClientSecure client;
   client.setInsecure(); // Required for HTTPS
+  client.setTimeout(15000); // Timeout setzen
   
   String dropoffUrl = "";
   // Use configured dropoff path or fallback
@@ -540,7 +541,10 @@ void uploadAndAnalyze(camera_fb_t *fb) {
       size_t chunkSize = 1024;
       for (size_t i = 0; i < fbLen; i += chunkSize) {
           size_t toSend = (fbLen - i < chunkSize) ? (fbLen - i) : chunkSize;
-          client.write(fbBuf + i, toSend);
+          if (client.write(fbBuf + i, toSend) != toSend) {
+              sysLog("Fehler: Upload abgebrochen (Write Error)");
+              break;
+          }
       }
       
       client.print(tail);
@@ -744,6 +748,9 @@ void setup() {
   if(!wm.autoConnect("NeuroSnap_Setup")) {
     ESP.restart();
   }
+  
+  // WICHTIG: WiFi Power Save deaktivieren, sonst hängt der Webserver oft
+  WiFi.setSleep(false);
   
   setStatusLED(255, 165, 0);
 
@@ -1084,6 +1091,7 @@ void uploadFile(String imagePath, String textPath) {
 
     WiFiClientSecure client;
     client.setInsecure(); // Ignore certificate validation
+    client.setTimeout(15000); // Timeout erhöhen
 
     if (!client.connect(host, port)) {
         sysLog("Fehler: Verbindung fehlgeschlagen zu " + String(host));
@@ -1127,7 +1135,11 @@ void uploadFile(String imagePath, String textPath) {
     
     while (imageFile.available()) {
         bytesRead = imageFile.read(buffer, sizeof(buffer));
-        client.write(buffer, bytesRead);
+        if (client.write(buffer, bytesRead) != bytesRead) {
+            sysLog("Fehler: Upload Write Failed");
+            break;
+        }
+        
         totalUploaded += bytesRead;
         
         // Log progress every ~20KB
